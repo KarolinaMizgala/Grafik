@@ -853,19 +853,37 @@
             var parts = timeStr.split(':');
             var hours = parseInt(parts[0], 10);
             var minutes = parseInt(parts[1], 10);
+            if (isNaN(hours) || isNaN(minutes)) return '';
+            // Send invariant decimal format to backend, e.g. 8.50
             var dec = (hours + minutes / 60).toFixed(2);
-            var separator = (1.1).toLocaleString().substring(1, 2);
-            if (separator !== '.') {
-                dec = dec.replace('.', separator);
-            }
             return dec;
         }
 
+        function pad2(value) {
+            return value < 10 ? '0' + value : '' + value;
+        }
+
+        function parseDecimal(value) {
+            if (value === null || value === undefined || value === '') {
+                return null;
+            }
+            var normalized = String(value).trim().replace(',', '.');
+            var parsed = Number.parseFloat(normalized);
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+
         function decimalToTimeFormat(decimal) {
-            if (!decimal) return '';
-            var hours = Math.floor(decimal);
-            var minutes = Math.round((decimal - hours) * 60);
-            return (hours < 10 ? '0' : '') + hours + ':' + (minutes < 10 ? '0' : '') + minutes;
+            var parsed = parseDecimal(decimal);
+            if (parsed === null) return '';
+
+            var hours = Math.floor(parsed);
+            var minutes = Math.round((parsed - hours) * 60);
+            if (minutes === 60) {
+                hours += 1;
+                minutes = 0;
+            }
+
+            return pad2(hours) + ':' + pad2(minutes);
         }
 
         // Otwieranie modal

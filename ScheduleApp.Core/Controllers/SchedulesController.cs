@@ -70,35 +70,12 @@ public class SchedulesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Create(ScheduleEntryEditViewModel model)
     {
-        // Try to parse StartHour/EndHour from form (handle locale decimal separator)
-        if (string.IsNullOrEmpty(model?.StartHour.ToString()) && Request.HasFormContentType && Request.Form.ContainsKey("StartHour"))
-        {
-            var raw = Request.Form["StartHour"].ToString();
-            if (!string.IsNullOrWhiteSpace(raw))
-            {
-                if (decimal.TryParse(raw, NumberStyles.Number, CultureInfo.CurrentCulture, out var val) ||
-                    decimal.TryParse(raw.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out val) ||
-                    decimal.TryParse(raw.Replace('.', ','), NumberStyles.Number, CultureInfo.GetCultureInfo("pl-PL"), out val))
-                {
-                    model.StartHour = val;
-                    ModelState.Remove("StartHour");
-                }
-            }
-        }
+        model.StartHour = ParseHourFromForm(Request, "startHour", model.StartHour);
+        model.EndHour = ParseHourFromForm(Request, "endHour", model.EndHour);
 
-        if (string.IsNullOrEmpty(model?.EndHour.ToString()) && Request.HasFormContentType && Request.Form.ContainsKey("EndHour"))
+        if (!IsHourInRange(model.StartHour) || !IsHourInRange(model.EndHour))
         {
-            var raw = Request.Form["EndHour"].ToString();
-            if (!string.IsNullOrWhiteSpace(raw))
-            {
-                if (decimal.TryParse(raw, NumberStyles.Number, CultureInfo.CurrentCulture, out var val) ||
-                    decimal.TryParse(raw.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out val) ||
-                    decimal.TryParse(raw.Replace('.', ','), NumberStyles.Number, CultureInfo.GetCultureInfo("pl-PL"), out val))
-                {
-                    model.EndHour = val;
-                    ModelState.Remove("EndHour");
-                }
-            }
+            ModelState.AddModelError(string.Empty, "Godziny muszą być w zakresie 0:00 - 24:00.");
         }
 
         if (!ModelState.IsValid)
@@ -167,35 +144,12 @@ public class SchedulesController : Controller
             return NotFound();
         }
 
-        // Parse StartHour/EndHour similar to Create to handle locale decimal separators
-        if (Request.HasFormContentType && Request.Form.ContainsKey("StartHour") && (model.StartHour == null))
-        {
-            var raw = Request.Form["StartHour"].ToString();
-            if (!string.IsNullOrWhiteSpace(raw))
-            {
-                if (decimal.TryParse(raw, NumberStyles.Number, CultureInfo.CurrentCulture, out var val) ||
-                    decimal.TryParse(raw.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out val) ||
-                    decimal.TryParse(raw.Replace('.', ','), NumberStyles.Number, CultureInfo.GetCultureInfo("pl-PL"), out val))
-                {
-                    model.StartHour = val;
-                    ModelState.Remove("StartHour");
-                }
-            }
-        }
+        model.StartHour = ParseHourFromForm(Request, "startHour", model.StartHour);
+        model.EndHour = ParseHourFromForm(Request, "endHour", model.EndHour);
 
-        if (Request.HasFormContentType && Request.Form.ContainsKey("EndHour") && (model.EndHour == null))
+        if (!IsHourInRange(model.StartHour) || !IsHourInRange(model.EndHour))
         {
-            var raw = Request.Form["EndHour"].ToString();
-            if (!string.IsNullOrWhiteSpace(raw))
-            {
-                if (decimal.TryParse(raw, NumberStyles.Number, CultureInfo.CurrentCulture, out var val) ||
-                    decimal.TryParse(raw.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out val) ||
-                    decimal.TryParse(raw.Replace('.', ','), NumberStyles.Number, CultureInfo.GetCultureInfo("pl-PL"), out val))
-                {
-                    model.EndHour = val;
-                    ModelState.Remove("EndHour");
-                }
-            }
+            ModelState.AddModelError(string.Empty, "Godziny muszą być w zakresie 0:00 - 24:00.");
         }
 
         if (!ModelState.IsValid || model.EmployeeId == null || model.Date == null)
@@ -334,11 +288,20 @@ public class SchedulesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> CreateBatch([FromForm] int employeeId, [FromForm] DateTime startDate, [FromForm] DateTime endDate, [FromForm] string type, [FromForm] decimal? startHour, [FromForm] decimal? endHour, [FromForm] string notes, [FromForm] bool ignoreHolidays = true)
     {
+        startHour = ParseHourFromForm(Request, "startHour", startHour);
+        endHour = ParseHourFromForm(Request, "endHour", endHour);
+
         var employee = await _context.Employees.FindAsync(employeeId);
 
         if (startDate > endDate)
         {
             ModelState.AddModelError(string.Empty, "Start date must be before end date.");
+            return RedirectToAction(nameof(Index), new { week = startDate.ToString("yyyy-MM-dd") });
+        }
+
+        if (!IsHourInRange(startHour) || !IsHourInRange(endHour))
+        {
+            TempData["Error"] = "Godziny muszą być w zakresie 0:00 - 24:00.";
             return RedirectToAction(nameof(Index), new { week = startDate.ToString("yyyy-MM-dd") });
         }
 
@@ -407,5 +370,33 @@ public class SchedulesController : Controller
         }
 
         return RedirectToAction(nameof(Index), new { week = startDate.ToString("yyyy-MM-dd"), view = "month" });
+    }
+
+    private static decimal? ParseHourFromForm(HttpRequest request, string key, decimal? currentValue)
+    {
+        if (!request.HasFormContentType)
+        {
+            return currentValue;
+        }
+
+        var raw = request.Form[key].ToString();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return currentValue;
+        }
+
+        // Always parse using invariant decimal point to avoid culture-specific 8,00 -> 800 issues on hosting.
+        var normalized = raw.Trim().Replace(',', '.');
+        if (decimal.TryParse(normalized, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return parsed;
+        }
+
+        return currentValue;
+    }
+
+    private static bool IsHourInRange(decimal? value)
+    {
+        return !value.HasValue || (value.Value >= 0m && value.Value <= 24m);
     }
 }
