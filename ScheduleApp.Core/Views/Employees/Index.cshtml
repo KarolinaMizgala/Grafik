@@ -1,0 +1,49 @@
+@model IEnumerable<Employee>
+@{
+    ViewData["Title"] = "Pracownicy";
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h1 class="page-title">Pracownicy</h1>
+        <p class="page-subtitle">Zarządzaj osobami przypisanymi do harmonogramów.</p>
+    </div>
+    <a class="btn btn-primary" asp-action="Create">Nowy pracownik</a>
+</div>
+
+<div class="card card-soft">
+    <div class="card-body p-0">
+        <table class="table table-hover table-clean mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Imię i nazwisko</th>
+                    <th>Umowa zlecenie</th>
+                    <th>Ilość miesięcy</th>
+                    <th>Norma godzin</th>
+                    <th class="text-end">Akcje</th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var employee in Model)
+            {
+                <tr>
+                    <td>@employee.FullName</td>
+                    <td>@(employee.IsContractZlecenie ? "Tak" : "Nie")</td>
+                    <td>@employee.ContractMonths</td>
+                    <td>@employee.NormHours</td>
+                    <td class="text-end">
+                        <a class="btn btn-sm btn-outline-secondary" asp-action="Edit" asp-route-id="@employee.Id">Edytuj</a>
+                        <a class="btn btn-sm btn-outline-danger" asp-action="Delete" asp-route-id="@employee.Id">Usuń</a>
+                    </td>
+                </tr>
+            }
+            @if (!Model.Any())
+            {
+                <tr>
+                    <td colspan="5" class="text-center text-muted py-4">Brak pracowników.</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</div>

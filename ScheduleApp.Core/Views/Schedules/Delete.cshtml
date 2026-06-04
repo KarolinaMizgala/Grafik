@@ -1,0 +1,26 @@
+@model ScheduleEntry
+@{
+    ViewData["Title"] = "Usuń wpis w harmonogramie";
+}
+
+<div class="card card-soft mx-auto" style="max-width: 920px;">
+    <div class="card-body p-4 p-md-5">
+        <h1 class="page-title text-danger" style="font-size: 28px;">Usuń wpis w harmonogramie</h1>
+        <p class="page-subtitle mb-4">Czy na pewno chcesz usunąć ten wpis?</p>
+        <dl class="row mb-0">
+            <dt class="col-sm-4">Pracownik</dt>
+            <dd class="col-sm-8">@Model.Employee?.FullName</dd>
+            <dt class="col-sm-4">Data</dt>
+            <dd class="col-sm-8">@Model.Date.ToString("yyyy-MM-dd")</dd>
+            <dt class="col-sm-4">Typ</dt>
+            <dd class="col-sm-8">@Model.Type</dd>
+        </dl>
+        <form asp-action="Delete" method="post" class="mt-4">
+            <input type="hidden" asp-for="Id" />
+            <div class="actions-row">
+                <button type="submit" class="btn btn-danger">Usuń</button>
+                <a asp-action="Index" class="btn btn-outline-secondary">Anuluj</a>
+            </div>
+        </form>
+    </div>
+</div>

@@ -1,0 +1,984 @@
+@model ScheduleViewModel
+@using System.Globalization
+@using System.Text.Json
+@{
+    ViewData["Title"] = "Harmonogram";
+    var days = Model.VisibleDays.ToList();
+    var isMonthView = Model.ViewMode == "month";
+    var isEmployeeView = Model.ViewMode == "employee";
+    var selectedEmployee = Model.Employees.FirstOrDefault(employee => employee.Id == Model.SelectedEmployeeId) ?? Model.Employees.FirstOrDefault();
+    IEnumerable<Employee> visibleEmployees = isEmployeeView && selectedEmployee != null ? new[] { selectedEmployee } : Model.Employees;
+    var monthStart = days.Any() ? new DateTime(days.First().Year, days.First().Month, 1) : DateTime.Today;
+    var monthEnd = new DateTime(monthStart.Year, monthStart.Month, DateTime.DaysInMonth(monthStart.Year, monthStart.Month));
+    var monthStartOffset = ((int)monthStart.DayOfWeek + 6) % 7;
+    var calendarStart = monthStart.AddDays(-monthStartOffset);
+    var monthEndOffset = (7 - ((int)monthEnd.DayOfWeek + 6) % 7 - 1 + 7) % 7;
+    var calendarEnd = monthEnd.AddDays(monthEndOffset);
+    var employeeCalendarDays = Enumerable.Range(0, (calendarEnd - calendarStart).Days + 1)
+        .Select(offset => calendarStart.AddDays(offset))
+        .ToList();
+    var employeeCalendarWeeks = employeeCalendarDays.Chunk(7).ToList();
+    var employeeWeekHeaders = new[] { "PON.", "WT.", "ŚR.", "CZW.", "PT.", "SOB.", "NIEDZ." };
+    var calendarColumns = isMonthView || isEmployeeView
+        ? $"repeat({(isEmployeeView ? 7 : days.Count)}, 120px)"
+        : $"240px repeat({days.Count}, minmax(0, 1fr))";
+    var rowColumns = isMonthView
+        ? $"240px repeat({days.Count}, 120px)"
+        : calendarColumns;
+    var rowStyle = $"grid-template-columns: {rowColumns};";
+    var calendarOnlyStyle = $"grid-template-columns: {calendarColumns};";
+    var employeeMonthTitle = isEmployeeView ? $"{MonthLabel(days.First())} {days.First().Year}" : string.Empty;
+    var previousDate = Model.ViewMode switch
+    {
+        "day" => Model.WeekStart.AddDays(-1).ToString("yyyy-MM-dd"),
+        "month" or "employee" => Model.WeekStart.AddMonths(-1).ToString("yyyy-MM-dd"),
+        _ => Model.WeekStart.AddDays(-7).ToString("yyyy-MM-dd")
+    };
+    var nextDate = Model.ViewMode switch
+    {
+        "day" => Model.WeekStart.AddDays(1).ToString("yyyy-MM-dd"),
+        "month" or "employee" => Model.WeekStart.AddMonths(1).ToString("yyyy-MM-dd"),
+        _ => Model.WeekStart.AddDays(7).ToString("yyyy-MM-dd")
+    };
+    var currentViewLabel = Model.ViewMode switch
+    {
+        "employee" => "Pracownik",
+        "month" => "Miesiąc",
+        "day" => "Dzień",
+        _ => "Tydzień"
+    };
+    var rangeLabel = Model.ViewMode is "month" or "employee"
+        ? $"{MonthLabel(days.First())} {days.First().Year}"
+        : $"{DayMonthLabel(Model.WeekStart)} {Model.WeekStart.Year} - {DayMonthLabel(Model.WeekStart.AddDays(6))} {Model.WeekStart.AddDays(6).Year}";
+    var selectedDay = days.FirstOrDefault(day => day.Date == DateTime.Today.Date);
+    if (selectedDay == default && days.Any())
+    {
+        selectedDay = days.First();
+    }
+    var months = new[] { "Sty", "Lut", "Mar", "Kwi", "Maj", "Cze", "Lip", "Sie", "Wrz", "Paź", "Lis", "Gru" };
+}
+
+@{
+    // Czy są jakieś naruszenia dla widocznych dni w kalendarzu?
+    var hasMonthViolation = Model.Employees.Any(emp =>
+    {
+        var empEntries = Model.Entries.Where(e => e.EmployeeId == emp.Id).ToList();
+        var warnings = !emp.IsContractZlecenie ? GetViolationMessages(empEntries) : new Dictionary<DateTime, List<string>>();
+        return warnings.Keys.Any(k => days.Any(d => d.Date == k.Date));
+    });
+}
+
+@functions {
+    string DayLabel(DateTime date, bool employeeView = false) => employeeView ? date.DayOfWeek switch
+    {
+        DayOfWeek.Monday => "PON.",
+        DayOfWeek.Tuesday => "WT.",
+        DayOfWeek.Wednesday => "ŚR.",
+        DayOfWeek.Thursday => "CZW.",
+        DayOfWeek.Friday => "PT.",
+        DayOfWeek.Saturday => "SOB.",
+        _ => "NIEDZ."
+    } : date.DayOfWeek switch
+    {
+        DayOfWeek.Monday => "Pn",
+        DayOfWeek.Tuesday => "Wt",
+        DayOfWeek.Wednesday => "Śr",
+        DayOfWeek.Thursday => "Cz",
+        DayOfWeek.Friday => "Pt",
+        DayOfWeek.Saturday => "So",
+        _ => "Nd"
+    };
+
+    string DayMonthLabel(DateTime date)
+    {
+        var month = new[] { "Sty", "Lut", "Mar", "Kwi", "Maj", "Cze", "Lip", "Sie", "Wrz", "Paź", "Lis", "Gru" }[date.Month - 1];
+        return $"{date.Day} {month}";
+    }
+
+    string MonthLabel(DateTime date)
+    {
+        var month = new[] { "Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec", "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień" }[date.Month - 1];
+        return month;
+    }
+
+    (DateTime Start, DateTime End) GetContractPeriod(DateTime date, int contractMonths)
+    {
+        var safeMonths = contractMonths <= 0 ? 1 : contractMonths;
+        var periodIndex = (date.Month - 1) / safeMonths;
+        var startMonth = periodIndex * safeMonths + 1;
+        var start = new DateTime(date.Year, startMonth, 1);
+        var end = start.AddMonths(safeMonths).AddDays(-1);
+        return (start, end);
+    }
+
+    DateTime GetStartDateTimeGlobal(ScheduleEntry entry) => entry.Date.Date.AddHours((double)entry.StartHour!.Value);
+
+    DateTime GetEndDateTimeGlobal(ScheduleEntry entry)
+    {
+        var start = entry.StartHour!.Value;
+        var end = entry.EndHour!.Value;
+        var endDate = entry.Date.Date.AddHours((double)end);
+        if (end < start)
+        {
+            endDate = endDate.AddDays(1);
+        }
+
+        return endDate;
+    }
+
+    string CellClass(ScheduleEntry? entry) => entry == null ? "planner-cell planner-cell-empty" : entry.Type switch
+    {
+        "Noc" => "planner-cell planner-cell-night",
+        "Wolne" => "planner-cell planner-cell-off",
+        "Urlop" => "planner-cell planner-cell-off",
+        "Święto" => "planner-cell planner-cell-holiday",
+        "Zwolnienie chorobowe" => "planner-cell planner-cell-sick",
+        _ => "planner-cell planner-cell-normal"
+    };
+
+    bool IsWorkingType(string type) => type is "Normal" or "Noc";
+
+    bool IsCountedAsPlanned(string type) => type is "Normal" or "Noc" or "Urlop" or "Zwolnienie chorobowe";
+
+    Dictionary<DateTime, List<string>> GetViolationMessages(IEnumerable<ScheduleEntry> entries)
+    {
+        var ordered = entries
+            .Where(item => item.StartHour.HasValue && item.EndHour.HasValue && IsWorkingType(item.Type))
+            .Select(item => new
+            {
+                Entry = item,
+                Start = GetStartDateTime(item),
+                End = GetEndDateTime(item),
+                Date = item.Date.Date
+            })
+            .OrderBy(item => item.Start)
+            .ToList();
+
+        var violations = new Dictionary<DateTime, List<string>>();
+
+        void AddViolation(DateTime date, string message)
+        {
+            var key = date.Date;
+            if (!violations.TryGetValue(key, out var messages))
+            {
+                messages = new List<string>();
+                violations[key] = messages;
+            }
+
+            if (!messages.Contains(message))
+            {
+                messages.Add(message);
+            }
+        }
+
+        DateTime GetStartDateTime(ScheduleEntry entry) => entry.Date.Date.AddHours((double)entry.StartHour!.Value);
+
+        DateTime GetEndDateTime(ScheduleEntry entry)
+        {
+            var start = entry.StartHour!.Value;
+            var end = entry.EndHour!.Value;
+            var endDate = entry.Date.Date.AddHours((double)end);
+            if (end < start)
+            {
+                endDate = endDate.AddDays(1);
+            }
+
+            return endDate;
+        }
+
+        for (var i = 1; i < ordered.Count; i++)
+        {
+            var previous = ordered[i - 1];
+            var current = ordered[i];
+            var previousEnd = previous.End;
+            var currentStart = current.Start;
+            var restGap = currentStart - previousEnd;
+
+            if (currentStart - previous.Start < TimeSpan.FromHours(24))
+            {
+                AddViolation(current.Date, "Doba pracownicza krótsza niż 24 godziny.");
+            }
+
+            if (restGap < TimeSpan.FromHours(11))
+            {
+                AddViolation(current.Date, "Odpoczynek dobowy krótszy niż 11 godzin.");
+            }
+        }
+
+        var intervalRanges = ordered.ToList();
+
+        if (intervalRanges.Count > 0)
+        {
+            bool HasWeeklyRestInWindow(DateTime windowStart, DateTime windowEnd)
+            {
+                var cursor = windowStart;
+                var segments = intervalRanges
+                    .Where(item => item.End > windowStart && item.Start < windowEnd)
+                    .Select(item => new
+                    {
+                        Start = item.Start < windowStart ? windowStart : item.Start,
+                        End = item.End > windowEnd ? windowEnd : item.End,
+                        item.Date
+                    })
+                    .OrderBy(item => item.Start)
+                    .ToList();
+
+                if (segments.Count == 0)
+                {
+                    return true;
+                }
+
+                foreach (var segment in segments)
+                {
+                    if (segment.Start - cursor >= TimeSpan.FromHours(35))
+                    {
+                        return true;
+                    }
+
+                    if (segment.End > cursor)
+                    {
+                        cursor = segment.End;
+                    }
+                }
+
+                return windowEnd - cursor >= TimeSpan.FromHours(35);
+            }
+
+            var candidateStarts = new HashSet<DateTime>();
+            var rangeStart = intervalRanges.Min(item => item.Start).Date;
+            var rangeEnd = intervalRanges.Max(item => item.End).Date;
+
+            for (var date = rangeStart; date <= rangeEnd; date = date.AddDays(1))
+            {
+                candidateStarts.Add(date);
+            }
+
+            foreach (var interval in intervalRanges)
+            {
+                candidateStarts.Add(interval.Start);
+                candidateStarts.Add(interval.End);
+            }
+
+            foreach (var windowStart in candidateStarts.OrderBy(item => item))
+            {
+                var windowEnd = windowStart.AddDays(7);
+                if (!HasWeeklyRestInWindow(windowStart, windowEnd))
+                {
+                    var offendingDay = intervalRanges
+                        .Where(item => item.End > windowStart && item.Start < windowEnd)
+                        .OrderBy(item => item.Start)
+                        .LastOrDefault();
+
+                    if (offendingDay != null)
+                    {
+                        AddViolation(offendingDay.Date, "Odpoczynek tygodniowy krótszy niż 35 godzin.");
+                    }
+                }
+            }
+        }
+
+        var sundays = entries
+            .Select(item => item.Date.Date)
+            .Distinct()
+            .OrderBy(date => date)
+            .Where(date => date.DayOfWeek == DayOfWeek.Sunday)
+            .ToList();
+
+        for (var i = 0; i < sundays.Count; i++)
+        {
+            if ((i + 1) % 4 != 0)
+            {
+                continue;
+            }
+
+            var sunday = sundays[i];
+            var hasWork = entries.Any(item => item.Date.Date == sunday && IsWorkingType(item.Type));
+            if (hasWork)
+            {
+                AddViolation(sunday, "Czwarta niedziela powinna być wolna.");
+            }
+        }
+
+        return violations;
+    }
+
+    string FormatValue(decimal value) => value.ToString("0.00", CultureInfo.GetCultureInfo("pl-PL"));
+
+    string FormatInvariantValue(decimal? value) => value.HasValue ? value.Value.ToString(CultureInfo.InvariantCulture) : string.Empty;
+
+    string FormatTime(decimal? hours)
+    {
+        if (!hours.HasValue) return string.Empty;
+        var h = (int)Math.Floor(hours.Value);
+        var m = (int)Math.Round((hours.Value - h) * 60);
+        return $"{h:00}:{m:00}";
+    }
+
+    decimal GetDurationHours(decimal? startHour, decimal? endHour)
+    {
+        if (!startHour.HasValue || !endHour.HasValue)
+        {
+            return 0m;
+        }
+
+        return endHour.Value >= startHour.Value
+            ? endHour.Value - startHour.Value
+            : 24m - startHour.Value + endHour.Value;
+    }
+
+    bool IsHoliday(DateTime date)
+    {
+        var fixedHolidays = new[] { "1-1", "6-1", "5-4", "6-4", "1-5", "3-5", "24-5", "4-6", "15-8", "1-11", "11-11", "24-12", "25-12", "26-12" };
+        var sundayExceptions = new[] { "25-1", "29-3", "26-4", "28-6", "30-8", "6-12", "13-12", "20-12" };
+        var key = $"{date.Day}-{date.Month}";
+        if (fixedHolidays.Contains(key)) return true;
+        if (date.DayOfWeek == DayOfWeek.Sunday && !sundayExceptions.Contains(key)) return true;
+        return false;
+    }
+}
+
+<section class="planner-shell">
+    @if (TempData["Error"] != null)
+    {
+        <div class="alert alert-danger">@TempData["Error"]</div>
+    }
+        @if (hasMonthViolation)
+        {
+            <div class="alert alert-danger d-flex align-items-start" role="alert" style="background:#fdecea;border-color:#f5c2c7;color:#842029;">
+                <div style="margin-right:12px;">
+                    <svg width="24" height="24" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <circle cx="8" cy="8" r="8" fill="#e21d2f"/>
+                        <path d="M8 4.5v4M8 11h.01" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <div>
+                    <div style="font-weight:700;">Niepoprawny plan pracy</div>
+                    <div>Co najmniej jeden dzień nie spełnia wymagań Kodeksu pracy.</div>
+                </div>
+            </div>
+        }
+    <div class="planner-header @(isEmployeeView ? "planner-header-employee" : "planner-header-shared")">
+        @if (isEmployeeView)
+        {
+            <div class="planner-employee-picker-wrap">
+                <div class="planner-employee-picker-label">Pracownik:</div>
+                <form class="planner-employee-picker" method="get" asp-action="Index">
+                    <input type="hidden" name="view" value="employee" />
+                    <input type="hidden" name="week" value="@Model.WeekStart.ToString("yyyy-MM-dd")" />
+                    <select id="employeeId" name="employeeId" class="planner-employee-select" onchange="this.form.submit()">
+                        @foreach (var employee in Model.Employees)
+                        {
+                            <option value="@employee.Id" selected="@(employee.Id == Model.SelectedEmployeeId ? "selected" : null)">@employee.FullName</option>
+                        }
+                    </select>
+                </form>
+            </div>
+        }
+        else
+        {
+            <div class="planner-left-meta">
+                <div class="planner-title">Plan pracy</div>
+            </div>
+        }
+
+        <div class="planner-week-nav">
+            <a class="planner-icon-btn text-decoration-none" asp-action="Index" asp-route-week="@previousDate" asp-route-view="@Model.ViewMode" aria-label="Previous view">&#8249;</a>
+            <div class="planner-week-dates">
+                @if (isEmployeeView)
+                {
+                    <div>@employeeMonthTitle</div>
+                }
+                else
+                {
+                    <div>@rangeLabel</div>
+                    <span>@currentViewLabel</span>
+                }
+            </div>
+            <a class="planner-icon-btn text-decoration-none" asp-action="Index" asp-route-week="@nextDate" asp-route-view="@Model.ViewMode" aria-label="Next view">&#8250;</a>
+        </div>
+        <div class="dropdown">
+            <button class="planner-menu-btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <span class="planner-menu-label">Widok</span>
+                <strong>@currentViewLabel</strong>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end planner-view-menu">
+                <li class="dropdown-header">Widok</li>
+                <li><a class="dropdown-item @(Model.ViewMode == "employee" ? "active" : string.Empty)" asp-action="Index" asp-route-week="@Model.WeekStart.ToString("yyyy-MM-dd")" asp-route-view="employee">Pracownik</a></li>
+                <li><a class="dropdown-item @(Model.ViewMode == "month" ? "active" : string.Empty)" asp-action="Index" asp-route-week="@Model.WeekStart.ToString("yyyy-MM-dd")" asp-route-view="month">Miesiąc</a></li>
+                <li><a class="dropdown-item @(Model.ViewMode == "week" ? "active" : string.Empty)" asp-action="Index" asp-route-week="@Model.WeekStart.ToString("yyyy-MM-dd")" asp-route-view="week">Tydzień</a></li>
+                <li><a class="dropdown-item @(Model.ViewMode == "day" ? "active" : string.Empty)" asp-action="Index" asp-route-week="@Model.WeekStart.ToString("yyyy-MM-dd")" asp-route-view="day">Dzień</a></li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="planner-board @(isMonthView ? "planner-board-month" : string.Empty) @(isEmployeeView ? "planner-board-employee" : string.Empty)">
+        @if (isEmployeeView)
+        {
+            <div class="planner-row planner-row-employee planner-row-employee-header" style="@calendarOnlyStyle">
+                @foreach (var dayHeader in employeeWeekHeaders)
+                {
+                    <div class="planner-head-cell planner-head-cell-employee">
+                        <div class="planner-day-label">
+                            <span>@dayHeader</span>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="planner-row @(isMonthView ? "planner-row-month" : string.Empty)" style="@rowStyle">
+                <div></div>
+                @foreach (var day in days)
+                {
+                    // compute people-per-timeslot counts for month view chart
+                    var dayEntriesForChart = Model.Entries
+                        .Where(e => e.Date.Date == day.Date && (e.Type == "Normal" || e.Type == "Noc") && e.StartHour.HasValue && e.EndHour.HasValue)
+                        .Select(e => new {
+                            Start = GetStartDateTimeGlobal(e),
+                            End = GetEndDateTimeGlobal(e)
+                        })
+                        .ToList();
+
+                    var labels = new List<string>();
+                    var counts = new List<int>();
+                    var binStart = day.Date.AddHours(6);
+                    var binEndLimit = day.Date.AddHours(20);
+                    while (binStart < binEndLimit)
+                    {
+                        var binEnd = binStart.AddMinutes(30);
+                        labels.Add(binStart.ToString("HH:mm"));
+                        var c = dayEntriesForChart.Count(it => it.Start < binEnd && it.End > binStart);
+                        counts.Add(c);
+                        binStart = binEnd;
+                    }
+                    <div class="planner-head-cell">
+                        <button type="button"
+                                class="planner-day-label planner-day-people"
+                                data-day="@day.ToString("yyyy-MM-dd")"
+                                data-labels='@Html.Raw(JsonSerializer.Serialize(labels))'
+                                data-counts='@Html.Raw(JsonSerializer.Serialize(counts))'>
+                            <span>@DayLabel(day)</span>
+                            <svg class="planner-day-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                <circle cx="12" cy="7" r="4" />
+                                <path d="M20 8v6" />
+                                <path d="M23 11h-6" />
+                            </svg>
+                        </button>
+                        <div class="planner-day-date">@DayMonthLabel(day)</div>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (Model.Employees.Any())
+        {
+            @foreach (var employee in visibleEmployees)
+            {
+                var employeeEntries = Model.Entries.Where(item => item.EmployeeId == employee.Id).ToList();
+                var contractPeriod = isMonthView ? GetContractPeriod(monthStart, employee.ContractMonths) : (Start: DateTime.MinValue, End: DateTime.MinValue);
+                var plannedWorkingEntries = isMonthView
+                    ? employeeEntries.Where(item => IsCountedAsPlanned(item.Type) && item.Date.Date >= contractPeriod.Start.Date && item.Date.Date <= contractPeriod.End.Date).ToList()
+                    : employeeEntries.Where(item => IsCountedAsPlanned(item.Type)).ToList();
+                var plannedHours = plannedWorkingEntries.Sum(item => GetDurationHours(item.StartHour, item.EndHour));
+                var plannedDays = plannedWorkingEntries.Count;
+                var overHours = plannedHours > employee.NormHours;
+                var overDays = plannedDays > employee.NormDays;
+                var warningMessages = !employee.IsContractZlecenie ? GetViolationMessages(employeeEntries) : new Dictionary<DateTime, List<string>>();
+
+                @if (isEmployeeView)
+                {
+                    @foreach (var week in employeeCalendarWeeks)
+                    {
+                    <div class="planner-row planner-row-employee" style="@calendarOnlyStyle">
+                        @foreach (var day in week)
+                        {
+                            var entry = employeeEntries.FirstOrDefault(item => item.Date.Date == day.Date);
+                            var cellClass = CellClass(entry);
+                            if (entry == null && IsHoliday(day))
+                            {
+                                cellClass = "planner-cell planner-cell-holiday";
+                            }
+                            var isOutsideMonth = day.Month != monthStart.Month;
+                            var dayClass = isOutsideMonth ? "planner-day-number planner-day-number-out" : "planner-day-number";
+                            var buttonClass = $"{cellClass} planner-cell-button {(isOutsideMonth ? "planner-cell-out-month" : string.Empty)}";
+                            var isViolationDay = warningMessages.TryGetValue(day.Date, out var dayWarnings);
+
+                            <button type="button" class="@buttonClass" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#scheduleFormModal"
+                                    data-employee-id="@employee.Id"
+                                    data-employee-name="@employee.FullName"
+                                    data-date="@day.ToString("yyyy-MM-dd")"
+                                    data-entry-id="@(entry?.Id ?? 0)"
+                                    data-start-hour="@FormatInvariantValue(entry?.StartHour)"
+                                    data-end-hour="@FormatInvariantValue(entry?.EndHour)"
+                                    data-type="@(entry?.Type ?? "Normal")"
+                                    data-notes="@(entry?.Notes ?? "")">
+                                <div class="@dayClass">@day.Day</div>
+                                
+                                @if (entry == null && IsHoliday(day))
+                                {
+                                    <div>
+                                        <div class="planner-cell-main">Święto</div>
+                                    </div>
+                                }
+                                @if (isViolationDay)
+                                {
+                                    <div class="planner-cell-warning-wrap">
+                                        <span class="planner-cell-warning text-danger fw-bold"
+                                              data-bs-toggle="tooltip"
+                                              data-bs-placement="top"
+                                                title="@string.Join(" • ", dayWarnings.Select(message => message ?? string.Empty))">!</span>
+                                    </div>
+                                }
+                                @if (entry != null)
+                                {
+                                    var start = FormatTime(entry.StartHour);
+                                    var end = FormatTime(entry.EndHour);
+                                    var duration = FormatTime(GetDurationHours(entry.StartHour, entry.EndHour));
+
+                                    if (entry.Type is "Normal" or "Noc")
+                                    {
+                                        <div>
+                                            <div class="planner-cell-main">@start - @end</div>
+                                            <div class="planner-cell-sub">(@duration)</div>
+                                        </div>
+                                    }
+                                    else if (entry.Type == "Wolne")
+                                    {
+                                        <div>
+                                            <div class="planner-cell-main">Wolne</div>
+                                            <div class="planner-cell-sub">(W5)</div>
+                                        </div>
+                                    }
+                                    else if (entry.Type == "Święto")
+                                    {
+                                        <div>
+                                            <div class="planner-cell-main">Święto</div>
+                                        </div>
+                                    }
+                                    else if (entry.Type == "Zwolnienie chorobowe")
+                                    {
+                                        <div>
+                                            <div class="planner-cell-main">Zwolnienie chorobowe</div>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div>
+                                            <div class="planner-cell-main">@entry.Type</div>
+                                            @if (!string.IsNullOrWhiteSpace(entry.Notes))
+                                            {
+                                                <div class="planner-cell-note">@entry.Notes</div>
+                                            }
+                                        </div>
+                                    }
+                                }
+                            </button>
+                        }
+                    </div>
+                    }
+                }
+                else
+                    {
+                        <div class="planner-row @(isMonthView ? "planner-row-month" : string.Empty)" style="@rowStyle">
+                            <div class="planner-employee-card">
+                                <div class="planner-employee-name">@employee.FullName</div>
+                                <div class="planner-employee-summary">
+                                    <div><strong>Norma:</strong> @FormatValue(employee.NormHours) godz. / @employee.ContractMonths mies.</div>
+                                    <div class="@(overHours ? "danger" : string.Empty)"><strong>Zaplanowano:</strong> @FormatValue(plannedHours) godz. / @plannedDays dni</div>
+                                </div>
+                            </div>
+
+                            @foreach (var day in days)
+                            {
+                                var entry = employeeEntries.FirstOrDefault(item => item.Date.Date == day.Date);
+                                var cellClass = CellClass(entry);
+                                if (entry == null && IsHoliday(day))
+                                {
+                                    cellClass = "planner-cell planner-cell-holiday";
+                                }
+                                var isViolationDay = warningMessages.TryGetValue(day.Date, out var dayWarnings);
+
+                                <button type="button" class="@cellClass planner-cell-button" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#scheduleFormModal"
+                                        data-employee-id="@employee.Id"
+                                        data-employee-name="@employee.FullName"
+                                        data-date="@day.ToString("yyyy-MM-dd")"
+                                        data-entry-id="@(entry?.Id ?? 0)"
+                                        data-start-hour="@FormatInvariantValue(entry?.StartHour)"
+                                        data-end-hour="@FormatInvariantValue(entry?.EndHour)"
+                                        data-type="@(entry?.Type ?? "Normal")"
+                                        data-notes="@(entry?.Notes ?? "")">
+                                    @if (entry == null && IsHoliday(day))
+                                    {
+                                        <div>
+                                            <div class="planner-cell-main">Święto</div>
+                                        </div>
+                                    }
+                                    
+                                    @if (isViolationDay)
+                                    {
+                                        <div class="planner-cell-warning-wrap">
+                                            <span class="planner-cell-warning text-danger fw-bold"
+                                                  data-bs-toggle="tooltip"
+                                                  data-bs-placement="top"
+                                                  title="@string.Join(" • ", dayWarnings.Select(message => message ?? string.Empty))">!</span>
+                                        </div>
+                                    }
+                                    @if (entry != null)
+                                    {
+                                        var start = FormatTime(entry.StartHour);
+                                        var end = FormatTime(entry.EndHour);
+                                        var duration = FormatTime(GetDurationHours(entry.StartHour, entry.EndHour));
+
+                                        if (entry.Type is "Normal" or "Noc")
+                                        {
+                                            <div>
+                                                <div class="planner-cell-main">@start - @end</div>
+                                                <div class="planner-cell-sub">(@duration)</div>
+                                            </div>
+                                        }
+                                        else if (entry.Type == "Wolne")
+                                        {
+                                            <div>
+                                                <div class="planner-cell-main">Wolne</div>
+                                                <div class="planner-cell-sub">(W5)</div>
+                                            </div>
+                                        }
+                                        else if (entry.Type == "Święto")
+                                        {
+                                            <div>
+                                                <div class="planner-cell-main">Święto</div>
+                                            </div>
+                                        }
+                                        else if (entry.Type == "Zwolnienie chorobowe")
+                                        {
+                                            <div>
+                                                <div class="planner-cell-main">Zwolnienie chorobowe</div>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div>
+                                                <div class="planner-cell-main">@entry.Type</div>
+                                                @if (!string.IsNullOrWhiteSpace(entry.Notes))
+                                                {
+                                                    <div class="planner-cell-note">@entry.Notes</div>
+                                                }
+                                            </div>
+                                        }
+                                    }
+                                </button>
+                            }
+                        </div>
+                    }
+            }
+        }
+        else
+        {
+            <div class="planner-empty-board">Add employees first to see the schedule grid.</div>
+        }
+    </div>
+
+    @if (isEmployeeView && selectedEmployee != null)
+    {
+        var selectedEmployeeEntries = Model.Entries.Where(item => item.EmployeeId == selectedEmployee.Id).ToList();
+        var selectedDayEntry = selectedEmployeeEntries.FirstOrDefault(item => item.Date.Date == selectedDay.Date);
+        var periodStart = new DateTime(days.First().Year, days.First().Month, 1);
+        var periodEnd = periodStart.AddMonths(1).AddDays(-1);
+        var selectedPlannedEmployeeEntries = isMonthView
+            ? selectedEmployeeEntries.Where(item => IsCountedAsPlanned(item.Type) && item.Date.Date >= GetContractPeriod(monthStart, selectedEmployee.ContractMonths).Start.Date && item.Date.Date <= GetContractPeriod(monthStart, selectedEmployee.ContractMonths).End.Date).ToList()
+            : selectedEmployeeEntries.Where(item => IsCountedAsPlanned(item.Type)).ToList();
+        var selectedPlannedHours = selectedPlannedEmployeeEntries.Sum(item => GetDurationHours(item.StartHour, item.EndHour));
+        var selectedPlannedDays = selectedPlannedEmployeeEntries.Count();
+        var selectedOverHours = selectedPlannedHours > selectedEmployee.NormHours;
+        var selectedWarningMessages = !selectedEmployee.IsContractZlecenie ? GetViolationMessages(selectedEmployeeEntries) : new Dictionary<DateTime, List<string>>();
+        var daySummary = selectedDayEntry != null
+            ? selectedDayEntry.Type == "Normal" || selectedDayEntry.Type == "Noc"
+                ? $"{FormatTime(selectedDayEntry.StartHour)} - {FormatTime(selectedDayEntry.EndHour)} Czas pracy podstawowy"
+                : selectedDayEntry.Type == "Wolne"
+                    ? "Wolne (W5)"
+                    : selectedDayEntry.Type
+            : "Brak wpisu";
+
+        <div class="planner-employee-footer">
+            <div class="planner-employee-footer-left">
+                <div>Okres rozliczeniowy: <strong>@periodStart.ToString("yyyy-MM-dd") - @periodEnd.ToString("yyyy-MM-dd")</strong></div>
+                <div>Norma: <strong>@FormatValue(selectedEmployee.NormHours) godz. / @selectedEmployee.ContractMonths mies.</strong></div>
+                <div class="@(selectedOverHours ? "danger" : string.Empty)">Zaplanowano: <strong>@FormatValue(selectedPlannedHours) godz. / @selectedPlannedDays dni</strong></div>
+            </div>
+            <div class="planner-employee-footer-divider"></div>
+            <div class="planner-employee-footer-right">
+                <div>Szczegóły dnia: <strong>@selectedDay.ToString("d MMMM", CultureInfo.GetCultureInfo("pl-PL"))</strong></div>
+                <div>@daySummary</div>
+            </div>
+        </div>
+    }
+</section>
+
+<!-- Modal do dodawania/edycji harmonogramu -->
+<div class="modal fade" id="scheduleFormModal" tabindex="-1" aria-labelledby="scheduleModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="scheduleModalLabel">Edycja planu pracy</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="scheduleForm" method="post">
+                <div class="modal-body">
+                    <input type="hidden" id="scheduleEmployeeId" name="employeeId" />
+                    <input type="hidden" id="scheduleDate" name="Date" />
+                    <input type="hidden" id="scheduleEntryId" />
+
+                    <div class="row g-4">
+                        <!-- LEWA KOLUMNA: Pracownik, Daty -->
+                        <div class="col-md-6">
+                            <h6 class="text-muted mb-3">Pracownik</h6>
+                            <div class="input-group mb-3">
+                                <span class="input-group-text border-0 bg-transparent">✕</span>
+                                <input type="text" id="scheduleEmployeeName" class="form-control border-start-0" readonly />
+                            </div>
+
+                            <h6 class="text-muted mb-3 mt-4">Okres i typ dnia</h6>
+                            <div class="mb-3">
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="batchMode" />
+                                    <label class="form-check-label small text-muted" for="batchMode">Seryjnie (zakres)</label>
+                                </div>
+
+                                <label class="form-label small text-muted">Data od</label>
+                                <input type="date" id="scheduleStartDate" name="startDate" class="form-control" />
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small text-muted">Data do</label>
+                                <input type="date" id="scheduleEndDate" name="endDate" class="form-control" />
+                            </div>
+                            <div class="mb-3 form-check">
+                                <input class="form-check-input" type="checkbox" id="ignoreHolidays" name="ignoreHolidays" checked />
+                                <label class="form-check-label small text-muted" for="ignoreHolidays">Ignoruj święta podczas tworzenia seryjnego</label>
+                            </div>
+                            <div class="mb-3">
+                                <label for="scheduleType" class="form-label small text-muted">Typ dnia</label>
+                                <select id="scheduleType" name="type" class="form-select">
+                                    <option value="Normal">Praca</option>
+                                    <option value="Noc">Noc</option>
+                                    <option value="Wolne">Wolne</option>
+                                    <option value="Urlop">Urlop</option>
+                                    <option value="Święto">Święto</option>
+                                    <option value="Zwolnienie chorobowe">Zwolnienie chorobowe</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- PRAWA KOLUMNA: Godziny, Rodzaj pracy -->
+                        <div class="col-md-6">
+                            <h6 class="text-muted mb-3">Plan dnia</h6>
+                            
+                            <div class="row g-2 mb-3">
+                                <div class="col-6">
+                                    <label for="startHourDisplay" class="form-label small text-muted">Godz. od</label>
+                                    <input type="time" id="startHourDisplay" class="form-control" />
+                                    <input type="hidden" id="startHour" name="startHour" />
+                                </div>
+                                <div class="col-6">
+                                    <label for="endHourDisplay" class="form-label small text-muted">Godz. do</label>
+                                    <input type="time" id="endHourDisplay" class="form-control" />
+                                    <input type="hidden" id="endHour" name="endHour" />
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="scheduleNotes" class="form-label small text-muted">Uwagi</label>
+                                <textarea id="scheduleNotes" name="notes" class="form-control" rows="4" placeholder="Notatki..."></textarea>
+                            </div>
+
+                            <div class="text-end">
+                                <a href="#" class="link-primary text-decoration-none">Pokaż szczegóły</a>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="submit" class="btn btn-primary">Zapisz</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: people per timeslot chart -->
+<div class="modal fade" id="peopleChartModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Ilość pracujących - <span id="peopleChartDate"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Zamknij"></button>
+            </div>
+            <div class="modal-body">
+                <canvas id="peopleChartCanvas" height="180"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        function timeFormatToDecimal(timeStr) {
+            if (!timeStr) return '';
+            var parts = timeStr.split(':');
+            var hours = parseInt(parts[0], 10);
+            var minutes = parseInt(parts[1], 10);
+            var dec = (hours + minutes / 60).toFixed(2);
+            var separator = (1.1).toLocaleString().substring(1, 2);
+            if (separator !== '.') {
+                dec = dec.replace('.', separator);
+            }
+            return dec;
+        }
+
+        function decimalToTimeFormat(decimal) {
+            if (!decimal) return '';
+            var hours = Math.floor(decimal);
+            var minutes = Math.round((decimal - hours) * 60);
+            return (hours < 10 ? '0' : '') + hours + ':' + (minutes < 10 ? '0' : '') + minutes;
+        }
+
+        // Otwieranie modal
+        document.querySelectorAll('[data-bs-toggle="modal"][data-bs-target="#scheduleFormModal"]').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                var employeeId = this.getAttribute('data-employee-id');
+                var date = this.getAttribute('data-date');
+                var entryId = this.getAttribute('data-entry-id');
+                var employeeName = this.getAttribute('data-employee-name');
+
+                document.getElementById('scheduleEmployeeId').value = employeeId;
+                document.getElementById('scheduleDate').value = date;
+                document.getElementById('scheduleEntryId').value = entryId || '';
+                document.getElementById('scheduleEmployeeName').value = employeeName;
+                document.getElementById('scheduleStartDate').value = date;
+                document.getElementById('scheduleEndDate').value = date;
+                // reset batch mode toggle
+                document.getElementById('batchMode').checked = false;
+
+                // Jeśli edycja - załaduj dane
+                if (entryId && entryId !== '0') {
+                    var startHour = this.getAttribute('data-start-hour');
+                    var endHour = this.getAttribute('data-end-hour');
+                    var type = this.getAttribute('data-type');
+                    var notes = this.getAttribute('data-notes');
+
+                    document.getElementById('startHourDisplay').value = startHour !== null && startHour !== '' ? decimalToTimeFormat(startHour) : '';
+                    document.getElementById('endHourDisplay').value = endHour !== null && endHour !== '' ? decimalToTimeFormat(endHour) : '';
+                    document.getElementById('scheduleType').value = type || 'Normal';
+                    document.getElementById('scheduleNotes').value = notes || '';
+                } else {
+                    // Nowy wpis
+                    document.getElementById('scheduleForm').reset();
+                    document.getElementById('scheduleEmployeeId').value = employeeId;
+                    document.getElementById('scheduleDate').value = date;
+                    document.getElementById('scheduleEmployeeName').value = employeeName;
+                    document.getElementById('scheduleStartDate').value = date;
+                    document.getElementById('scheduleEndDate').value = date;
+                    document.getElementById('scheduleType').value = 'Normal';
+                }
+            });
+        });
+
+        // Obsługa formularza
+        document.getElementById('scheduleForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            var startTimeStr = document.getElementById('startHourDisplay').value;
+            var endTimeStr = document.getElementById('endHourDisplay').value;
+            var entryId = document.getElementById('scheduleEntryId').value;
+            var employeeId = document.getElementById('scheduleEmployeeId').value;
+            var date = document.getElementById('scheduleDate').value;
+            var batchMode = document.getElementById('batchMode').checked;
+
+            // Konwersja czasu
+            document.getElementById('startHour').value = timeFormatToDecimal(startTimeStr);
+            document.getElementById('endHour').value = timeFormatToDecimal(endTimeStr);
+
+            var formData = new FormData(this);
+            var action;
+            if (batchMode) {
+                action = '/Schedules/CreateBatch';
+                // ensure start/end dates are present
+                var s = document.getElementById('scheduleStartDate').value;
+                var e = document.getElementById('scheduleEndDate').value;
+                if (!s || !e) {
+                    alert('Wprowadź datę początku i końca zakresu');
+                    return;
+                }
+            } else {
+                action = (entryId && entryId !== '0') ? '/Schedules/Edit/' + entryId : '/Schedules/Create';
+            }
+
+            fetch(action, {
+                method: 'POST',
+                body: formData
+            }).then(response => {
+                if (response.ok) {
+                    location.reload();
+                } else {
+                    alert('Błąd przy zapisywaniu');
+                }
+            }).catch(err => {
+                console.error('Error:', err);
+                alert('Błąd sieci');
+            });
+        });
+
+        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (element) {
+            new bootstrap.Tooltip(element);
+        });
+
+        // Chart.js for people per timeslot
+        var peopleChart = null;
+        function renderPeopleChart(labels, counts) {
+            var ctx = document.getElementById('peopleChartCanvas').getContext('2d');
+            if (peopleChart) { peopleChart.destroy(); }
+            peopleChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Pracujących',
+                        data: counts,
+                        backgroundColor: 'rgba(54, 162, 235, 0.6)'
+                    }]
+                },
+                options: {
+                    scales: {
+                        x: { ticks: { maxRotation: 45, minRotation: 0, autoSkip: true, maxTicksLimit: 14 } },
+                        y: { beginAtZero: true, precision:0 }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        document.querySelectorAll('.planner-day-people').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                var labels = JSON.parse(this.getAttribute('data-labels') || '[]');
+                var counts = JSON.parse(this.getAttribute('data-counts') || '[]');
+                var day = this.getAttribute('data-day');
+                document.getElementById('peopleChartDate').textContent = day;
+                // open modal
+                var modal = new bootstrap.Modal(document.getElementById('peopleChartModal'));
+                modal.show();
+                // wait a tick for canvas size
+                setTimeout(function(){ renderPeopleChart(labels, counts); }, 50);
+            });
+        });
+    </script>
+}
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>

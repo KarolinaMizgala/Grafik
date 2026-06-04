@@ -1,0 +1,11 @@
+.vs/
+bin/
+obj/
+packages/
+_buildcheck*/
+*.user
+*.suo
+*.cache
+*.log
+*.vspscc
+*.vssscc
