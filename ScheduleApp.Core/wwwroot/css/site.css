@@ -398,6 +398,33 @@ body {
     color: rgba(32, 36, 44, 0.35);
 }
 
+/* Day employees modal: make chart fill viewport and avoid page scrolling */
+#dayEmployeesModal .modal-dialog {
+    max-width: 100%;
+    margin: 0;
+}
+#dayEmployeesModal .modal-content {
+    height: 100vh;
+    border-radius: 0;
+}
+#dayEmployeesModal .modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 1rem 1.25rem;
+    height: calc(100vh - 70px); /* header height approx */
+    overflow: hidden;
+}
+#dayEmployeesChart {
+    width: 100% !important;
+    height: 100% !important;
+    flex: 1 1 auto;
+}
+#dayEmployeesModal .table-responsive {
+    max-height: 220px;
+    overflow: auto;
+}
+
 .planner-cell-out-month {
     opacity: 0.85;
 }
@@ -464,6 +491,21 @@ body {
     align-items: center;
     gap: 4px;
     font-size: 17px;
+}
+
+.planner-day-summary {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    cursor: pointer;
+    justify-content: center;
+}
+
+.planner-day-summary:focus-visible {
+    outline: 2px solid #5971ff;
+    outline-offset: 3px;
+    border-radius: 8px;
 }
 
 .planner-day-date {

@@ -31,7 +31,6 @@
     var previousDate = Model.ViewMode switch
     {
         "day" => Model.WeekStart.AddDays(-1).ToString("yyyy-MM-dd"),
-        "month" or "employee" => Model.WeekStart.AddMonths(-1).ToString("yyyy-MM-dd"),
         _ => Model.WeekStart.AddDays(-7).ToString("yyyy-MM-dd")
     };
     var nextDate = Model.ViewMode switch
@@ -431,40 +430,43 @@
                 <div></div>
                 @foreach (var day in days)
                 {
-                    // compute people-per-timeslot counts for month view chart
-                    var dayEntriesForChart = Model.Entries
-                        .Where(e => e.Date.Date == day.Date && (e.Type == "Normal" || e.Type == "Noc") && e.StartHour.HasValue && e.EndHour.HasValue)
-                        .Select(e => new {
-                            Start = GetStartDateTimeGlobal(e),
-                            End = GetEndDateTimeGlobal(e)
+                    var dayEntries = Model.Entries
+                        .Where(e => e.Date.Date == day.Date && IsWorkingType(e.Type) && e.StartHour.HasValue && e.EndHour.HasValue)
+                        .Select(e => new
+                        {
+                            EmployeeName = Model.Employees.FirstOrDefault(employee => employee.Id == e.EmployeeId)?.FullName ?? "Pracownik",
+                            Type = e.Type,
+                            Start = FormatTime(e.StartHour),
+                            End = FormatTime(e.EndHour),
+                            Notes = e.Notes ?? string.Empty,
+                            StartDt = GetStartDateTimeGlobal(e),
+                            EndDt = GetEndDateTimeGlobal(e)
                         })
                         .ToList();
 
-                    var labels = new List<string>();
-                    var counts = new List<int>();
-                    var binStart = day.Date.AddHours(6);
-                    var binEndLimit = day.Date.AddHours(20);
-                    while (binStart < binEndLimit)
+                    var binLabels = new List<string>();
+                    var binCounts = new List<int>();
+                    var binStartAll = day.Date.Date;
+                    var binEndAll = day.Date.Date.AddDays(1);
+                    var cursor = binStartAll;
+                    while (cursor < binEndAll)
                     {
-                        var binEnd = binStart.AddMinutes(30);
-                        labels.Add(binStart.ToString("HH:mm"));
-                        var c = dayEntriesForChart.Count(it => it.Start < binEnd && it.End > binStart);
-                        counts.Add(c);
-                        binStart = binEnd;
+                        var binEnd = cursor.AddMinutes(30);
+                        binLabels.Add(cursor.ToString("HH:mm"));
+                        var c = dayEntries.Count(it => it.StartDt < binEnd && it.EndDt > cursor);
+                        binCounts.Add(c);
+                        cursor = binEnd;
                     }
                     <div class="planner-head-cell">
                         <button type="button"
-                                class="planner-day-label planner-day-people"
-                                data-day="@day.ToString("yyyy-MM-dd")"
-                                data-labels='@Html.Raw(JsonSerializer.Serialize(labels))'
-                                data-counts='@Html.Raw(JsonSerializer.Serialize(counts))'>
+                                class="planner-day-label planner-day-summary"
+                                data-bs-toggle="modal"
+                                data-bs-target="#dayEmployeesModal"
+                                    data-day="@day.ToString("yyyy-MM-dd")"
+                                    data-entries='@Html.Raw(JsonSerializer.Serialize(dayEntries.Select(x=>new { x.EmployeeName, x.Type, x.Start, x.End, x.Notes })))'
+                                    data-labels='@Html.Raw(JsonSerializer.Serialize(binLabels))'
+                                    data-counts='@Html.Raw(JsonSerializer.Serialize(binCounts))'>
                             <span>@DayLabel(day)</span>
-                            <svg class="planner-day-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <path d="M17 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                                <circle cx="12" cy="7" r="4" />
-                                <path d="M20 8v6" />
-                                <path d="M23 11h-6" />
-                            </svg>
                         </button>
                         <div class="planner-day-date">@DayMonthLabel(day)</div>
                     </div>
@@ -813,22 +815,38 @@
     </div>
 </div>
 
-<!-- Modal: people per timeslot chart -->
-<div class="modal fade" id="peopleChartModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-centered">
+<!-- Modal: day employee summary -->
+<div class="modal fade" id="dayEmployeesModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen modal-lg modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Ilość pracujących - <span id="peopleChartDate"></span></h5>
+                <h5 class="modal-title">Zaplanowani pracownicy - <span id="dayEmployeesDate"></span></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Zamknij"></button>
             </div>
             <div class="modal-body">
-                <canvas id="peopleChartCanvas" height="180"></canvas>
+                <div class="mb-3 text-muted fw-semibold">Zakres: 0:00 - 24:00</div>
+                <canvas id="dayEmployeesChart" class="mb-3"></canvas>
+                <div id="dayEmployeesEmpty" class="alert alert-light border d-none mb-3">Brak zaplanowanych pracowników w tym dniu.</div>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Pracownik</th>
+                                <th>Godziny</th>
+                                <th>Typ</th>
+                                <th>Uwagi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dayEmployeesBody"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
 @section Scripts {
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         function timeFormatToDecimal(timeStr) {
             if (!timeStr) return '';
@@ -940,45 +958,72 @@
             new bootstrap.Tooltip(element);
         });
 
-        // Chart.js for people per timeslot
-        var peopleChart = null;
-        function renderPeopleChart(labels, counts) {
-            var ctx = document.getElementById('peopleChartCanvas').getContext('2d');
-            if (peopleChart) { peopleChart.destroy(); }
-            peopleChart = new Chart(ctx, {
+        document.querySelectorAll('.planner-day-summary').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                var day = this.getAttribute('data-day');
+                var entries = JSON.parse(this.getAttribute('data-entries') || '[]');
+                var labels = JSON.parse(this.getAttribute('data-labels') || '[]');
+                var counts = JSON.parse(this.getAttribute('data-counts') || '[]');
+                document.getElementById('dayEmployeesDate').textContent = day;
+
+                var body = document.getElementById('dayEmployeesBody');
+                var empty = document.getElementById('dayEmployeesEmpty');
+                body.innerHTML = '';
+
+                if (!entries.length) {
+                    empty.classList.remove('d-none');
+                } else {
+                    empty.classList.add('d-none');
+                    entries.forEach(function(item) {
+                        var row = document.createElement('tr');
+                        row.innerHTML = '<td class="fw-semibold"></td><td></td><td></td><td></td>';
+                        row.children[0].textContent = item.EmployeeName || '';
+                        row.children[1].textContent = (item.Start || '') + ' - ' + (item.End || '');
+                        row.children[2].textContent = item.Type || '';
+                        row.children[3].textContent = item.Notes || '';
+                        body.appendChild(row);
+                    });
+                }
+                // render 24h chart
+                renderDayChart(labels, counts);
+                // show modal (bootstrap handles show via data-bs-toggle)
+            });
+        });
+
+        var dayChart = null;
+        function renderDayChart(labels, counts) {
+            var ctx = document.getElementById('dayEmployeesChart').getContext('2d');
+            if (dayChart) { dayChart.destroy(); }
+            dayChart = new Chart(ctx, {
                 type: 'bar',
                 data: {
                     labels: labels,
                     datasets: [{
                         label: 'Pracujących',
                         data: counts,
-                        backgroundColor: 'rgba(54, 162, 235, 0.6)'
+                        backgroundColor: 'rgba(54, 162, 235, 0.45)',
+                        borderColor: 'rgba(54, 162, 235, 0.8)',
+                        borderWidth: 1
                     }]
                 },
                 options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
                     scales: {
-                        x: { ticks: { maxRotation: 45, minRotation: 0, autoSkip: true, maxTicksLimit: 14 } },
+                        x: {
+                            grid: { display: true },
+                            ticks: {
+                                autoSkip: false,
+                                maxRotation: 90,
+                                minRotation: 0,
+                                callback: function(value, index, ticks) { return this.getLabelForValue(index); }
+                            }
+                        },
                         y: { beginAtZero: true, precision:0 }
                     },
-                    plugins: { legend: { display: false } }
+                    plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } }
                 }
             });
         }
-
-        document.querySelectorAll('.planner-day-people').forEach(function(btn) {
-            btn.addEventListener('click', function(e) {
-                var labels = JSON.parse(this.getAttribute('data-labels') || '[]');
-                var counts = JSON.parse(this.getAttribute('data-counts') || '[]');
-                var day = this.getAttribute('data-day');
-                document.getElementById('peopleChartDate').textContent = day;
-                // open modal
-                var modal = new bootstrap.Modal(document.getElementById('peopleChartModal'));
-                modal.show();
-                // wait a tick for canvas size
-                setTimeout(function(){ renderPeopleChart(labels, counts); }, 50);
-            });
-        });
     </script>
 }
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
