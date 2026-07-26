@@ -66,6 +66,27 @@
         var cssClass = overHours ? "danger" : string.Empty;
         return $"<div class=\"planner-pdf-summary-item {cssClass}\"><strong>{employee.FullName}</strong> · Norma: {FormatValue(employee.NormHours)} godz. / {employee.ContractMonths} mies. · Zaplanowano: {FormatValue(plannedHours)} godz. / {plannedDays} dni</div>";
     }));
+    var pdfDailySummaryHtml = string.Join("", days.Select(day =>
+    {
+        var dayEntries = Model.Entries
+            .Where(e => e.Date.Date == day.Date && IsWorkingType(e.Type) && e.StartHour.HasValue && e.EndHour.HasValue)
+            .Select(e => new
+            {
+                EmployeeName = Model.Employees.FirstOrDefault(employee => employee.Id == e.EmployeeId)?.FullName ?? "Pracownik",
+                Type = e.Type,
+                Start = FormatTime(e.StartHour),
+                End = FormatTime(e.EndHour)
+            })
+            .ToList();
+
+        if (!dayEntries.Any())
+        {
+            return string.Empty;
+        }
+
+        var entriesText = string.Join("; ", dayEntries.Select(entry => $"{entry.EmployeeName} ({entry.Type}, {entry.Start}-{entry.End})"));
+        return $"<div class=\"planner-pdf-day-item\"><strong>{DayLabel(day)} {DayMonthLabel(day)}:</strong> {entriesText}</div>";
+    }).Where(item => !string.IsNullOrWhiteSpace(item)));
 }
 
 @{
@@ -1120,6 +1141,10 @@
                 summary.className = 'planner-pdf-summary';
                 summary.innerHTML = @Html.Raw(JsonSerializer.Serialize(pdfSummaryHtml));
 
+                var dailySummary = document.createElement('div');
+                dailySummary.className = 'planner-pdf-daily-summary';
+                dailySummary.innerHTML = @Html.Raw(JsonSerializer.Serialize(pdfDailySummaryHtml));
+
                 // Create a copy of the board for PDF
                 var clonedBoard = element.cloneNode(true);
                 clonedBoard.classList.add('planner-pdf-export');
@@ -1153,6 +1178,7 @@
 
                 pdfHost.appendChild(header);
                 pdfHost.appendChild(summary);
+                pdfHost.appendChild(dailySummary);
                 pdfHost.appendChild(clonedBoard);
                 document.body.appendChild(pdfHost);
                 
