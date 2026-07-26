@@ -1171,8 +1171,8 @@
                     button.removeAttribute('data-bs-target');
                 });
                 
-                // Hide modal, buttons and unnecessary elements
-                clonedBoard.querySelectorAll('.planner-cell-button, .planner-day-summary, #exportPdfBtn').forEach(el => {
+                // Hide modal, buttons and unnecessary UI controls (keep cell content visible)
+                clonedBoard.querySelectorAll('.planner-day-summary, #exportPdfBtn, .planner-controls, .planner-menu-btn, .dropdown, .modal, .app-topbar, .app-sidebar').forEach(el => {
                     el.style.display = 'none';
                 });
 
