@@ -667,6 +667,151 @@ body {
     opacity: 0.98;
 }
 
+.planner-pdf-host {
+    position: fixed;
+    left: -10000px;
+    top: 0;
+    background: #fff;
+    padding: 16px;
+    color: #20242c;
+}
+
+.planner-pdf-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #d9def0;
+}
+
+.planner-pdf-title {
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.1;
+}
+
+.planner-pdf-subtitle {
+    margin-top: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #5a6170;
+}
+
+.planner-pdf-meta {
+    font-size: 12px;
+    font-weight: 700;
+    color: #5a6170;
+    text-align: right;
+}
+
+.planner-pdf-export {
+    overflow: visible;
+    background: #fff;
+}
+
+.planner-pdf-export .planner-row {
+    gap: 2px;
+    margin-bottom: 2px;
+}
+
+.planner-pdf-export .planner-head-cell,
+.planner-pdf-export .planner-cell,
+.planner-pdf-export .planner-employee-card {
+    border-radius: 0;
+    box-shadow: inset 0 0 0 1px #cfd5e4;
+}
+
+.planner-pdf-export .planner-head-cell {
+    min-height: 38px;
+}
+
+.planner-pdf-export .planner-employee-card {
+    min-height: 72px;
+    padding: 8px 10px;
+}
+
+.planner-pdf-export .planner-cell {
+    min-height: 72px;
+    padding: 6px 4px;
+}
+
+.planner-pdf-export .planner-day-label {
+    font-size: 12px;
+}
+
+.planner-pdf-export .planner-day-date {
+    font-size: 10px;
+}
+
+.planner-pdf-export .planner-cell-main {
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.planner-pdf-export .planner-cell-sub {
+    font-size: 9px;
+    margin-top: 1px;
+}
+
+.planner-pdf-export .planner-cell-note {
+    font-size: 9px;
+    margin-top: 2px;
+}
+
+.planner-pdf-export .planner-cell-warning-wrap,
+.planner-pdf-export .planner-cell-question-wrap {
+    top: 3px;
+}
+
+.planner-pdf-export .planner-cell-warning,
+.planner-pdf-export .planner-cell-question {
+    width: 12px;
+    height: 12px;
+    font-size: 8px;
+}
+
+.planner-pdf-export .planner-cell-button {
+    cursor: default !important;
+}
+
+/* Print styles */
+@media print {
+    body {
+        background: white;
+        margin: 0;
+        padding: 0;
+    }
+
+    .app-topbar,
+    .app-sidebar,
+    .planner-controls,
+    .planner-menu-btn,
+    .dropdown,
+    .modal,
+    .btn,
+    button {
+        display: none !important;
+    }
+
+    .planner-board {
+        width: 100%;
+        padding: 0;
+        background: white;
+    }
+
+    .planner-row,
+    .planner-cell,
+    .planner-head-cell {
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
+
+    .planner-cell-button {
+        cursor: default !important;
+    }
+}
+
 .planner-cell-note {
     margin-top: 4px;
     font-size: 12px;

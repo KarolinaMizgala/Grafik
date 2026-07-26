@@ -325,6 +325,18 @@
             : 24m - startHour.Value + endHour.Value;
     }
 
+    decimal GetEntryHours(ScheduleEntry entry, Employee employee)
+    {
+        // Vacation and sick leave count as full daily norm
+        if (entry.Type == "Urlop" || entry.Type == "Zwolnienie chorobowe")
+        {
+            return employee.NormHours;
+        }
+
+        // Regular shifts - calculate from start/end hours
+        return GetDurationHours(entry.StartHour, entry.EndHour);
+    }
+
     bool IsHoliday(DateTime date)
     {
         var fixedHolidays = new[] { "1-1", "6-1", "5-4", "6-4", "1-5", "3-5", "24-5", "4-6", "15-8", "1-11", "11-11", "24-12", "25-12", "26-12" };
@@ -408,6 +420,12 @@
                 <li><a class="dropdown-item @(Model.ViewMode == "day" ? "active" : string.Empty)" asp-action="Index" asp-route-week="@Model.WeekStart.ToString("yyyy-MM-dd")" asp-route-view="day">Dzień</a></li>
             </ul>
         </div>
+        @if (isMonthView)
+        {
+            <button id="exportPdfBtn" class="planner-menu-btn" title="Pobierz harmonogram jako PDF">
+                📄 PDF
+            </button>
+        }
     </div>
 
     <div class="planner-board @(isMonthView ? "planner-board-month" : string.Empty) @(isEmployeeView ? "planner-board-employee" : string.Empty)">
@@ -482,8 +500,8 @@
                 var contractPeriod = isMonthView ? GetContractPeriod(monthStart, employee.ContractMonths) : (Start: DateTime.MinValue, End: DateTime.MinValue);
                 var plannedWorkingEntries = isMonthView
                     ? employeeEntries.Where(item => IsCountedAsPlanned(item.Type) && item.Date.Date >= contractPeriod.Start.Date && item.Date.Date <= contractPeriod.End.Date).ToList()
-                    : employeeEntries.Where(item => IsCountedAsPlanned(item.Type)).ToList();
-                var plannedHours = plannedWorkingEntries.Sum(item => GetDurationHours(item.StartHour, item.EndHour));
+                    : new List<ScheduleEntry>();
+                var plannedHours = plannedWorkingEntries.Sum(item => GetEntryHours(item, employee));
                 var plannedDays = plannedWorkingEntries.Count;
                 var overHours = plannedHours > employee.NormHours;
                 var overDays = plannedDays > employee.NormDays;
@@ -693,9 +711,9 @@
         var periodStart = new DateTime(days.First().Year, days.First().Month, 1);
         var periodEnd = periodStart.AddMonths(1).AddDays(-1);
         var selectedPlannedEmployeeEntries = isMonthView
-            ? selectedEmployeeEntries.Where(item => IsCountedAsPlanned(item.Type) && item.Date.Date >= GetContractPeriod(monthStart, selectedEmployee.ContractMonths).Start.Date && item.Date.Date <= GetContractPeriod(monthStart, selectedEmployee.ContractMonths).End.Date).ToList()
-            : selectedEmployeeEntries.Where(item => IsCountedAsPlanned(item.Type)).ToList();
-        var selectedPlannedHours = selectedPlannedEmployeeEntries.Sum(item => GetDurationHours(item.StartHour, item.EndHour));
+            ? selectedEmployeeEntries.Where(item => IsCountedAsPlanned(item.Type) && item.Date.Date >= GetContractPeriod(periodStart, selectedEmployee.ContractMonths).Start.Date && item.Date.Date <= GetContractPeriod(periodStart, selectedEmployee.ContractMonths).End.Date).ToList()
+            : new List<ScheduleEntry>();
+        var selectedPlannedHours = selectedPlannedEmployeeEntries.Sum(item => GetEntryHours(item, selectedEmployee));
         var selectedPlannedDays = selectedPlannedEmployeeEntries.Count();
         var selectedOverHours = selectedPlannedHours > selectedEmployee.NormHours;
         var selectedWarningMessages = !selectedEmployee.IsContractZlecenie ? GetViolationMessages(selectedEmployeeEntries) : new Dictionary<DateTime, List<string>>();
@@ -847,6 +865,8 @@
 
 @section Scripts {
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script>
         function timeFormatToDecimal(timeStr) {
             if (!timeStr) return '';
@@ -937,10 +957,22 @@
             var employeeId = document.getElementById('scheduleEmployeeId').value;
             var date = document.getElementById('scheduleDate').value;
             var batchMode = document.getElementById('batchMode').checked;
+            var type = document.getElementById('scheduleType').value;
 
-            // Konwersja czasu
-            document.getElementById('startHour').value = timeFormatToDecimal(startTimeStr);
-            document.getElementById('endHour').value = timeFormatToDecimal(endTimeStr);
+            // Walidacja - godziny wymagane dla Normal i Noc
+            if ((type === 'Normal' || type === 'Noc') && (!startTimeStr || !endTimeStr)) {
+                alert('Dla typu dnia "' + type + '" wymagane są godziny od i do');
+                return;
+            }
+
+            // Konwersja czasu - dla Urlop/Zwolnienie chorobowe może być pusty
+            if (startTimeStr && endTimeStr) {
+                document.getElementById('startHour').value = timeFormatToDecimal(startTimeStr);
+                document.getElementById('endHour').value = timeFormatToDecimal(endTimeStr);
+            } else {
+                document.getElementById('startHour').value = '';
+                document.getElementById('endHour').value = '';
+            }
 
             var formData = new FormData(this);
             var action;
@@ -1041,6 +1073,87 @@
                     },
                     plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } }
                 }
+            });
+        }
+
+        // Export to PDF
+        var exportPdfBtn = document.getElementById('exportPdfBtn');
+        if (exportPdfBtn) {
+            exportPdfBtn.addEventListener('click', function() {
+                var element = document.querySelector('.planner-board');
+                var monthKey = '@monthStart.ToString("yyyy-MM")';
+                var fileName = 'Harmonogram_' + monthKey.replace('-', '_') + '.pdf';
+                var daysCount = @days.Count;
+                var employeeColumnWidth = 170;
+                var dayColumnWidth = 28;
+                var gapSize = 2;
+
+                if (!element) {
+                    return;
+                }
+
+                var pdfHost = document.createElement('div');
+                pdfHost.className = 'planner-pdf-host';
+
+                var header = document.createElement('div');
+                header.className = 'planner-pdf-header';
+                header.innerHTML = `
+                    <div>
+                        <div class="planner-pdf-title">Harmonogram miesięczny</div>
+                        <div class="planner-pdf-subtitle">@rangeLabel</div>
+                    </div>
+                    <div class="planner-pdf-meta">Wygenerowano: ${new Date().toLocaleDateString('pl-PL')}</div>
+                `;
+
+                // Create a copy of the board for PDF
+                var clonedBoard = element.cloneNode(true);
+                clonedBoard.classList.add('planner-pdf-export');
+                clonedBoard.style.width = (employeeColumnWidth + (daysCount * dayColumnWidth) + ((daysCount + 1) * gapSize)) + 'px';
+                clonedBoard.querySelectorAll('.planner-row').forEach(function(row) {
+                    row.style.gridTemplateColumns = employeeColumnWidth + 'px repeat(' + daysCount + ', ' + dayColumnWidth + 'px)';
+                    row.style.gap = gapSize + 'px';
+                    row.style.marginBottom = '2px';
+                });
+                clonedBoard.querySelectorAll('.planner-head-cell, .planner-cell').forEach(function(cell) {
+                    cell.style.width = dayColumnWidth + 'px';
+                    cell.style.minWidth = dayColumnWidth + 'px';
+                    cell.style.borderRadius = '0';
+                });
+                clonedBoard.querySelectorAll('.planner-employee-card').forEach(function(card) {
+                    card.style.width = employeeColumnWidth + 'px';
+                    card.style.minWidth = employeeColumnWidth + 'px';
+                    card.style.borderRadius = '0';
+                });
+                clonedBoard.querySelectorAll('.planner-cell-button').forEach(function(button) {
+                    button.style.pointerEvents = 'none';
+                    button.style.cursor = 'default';
+                    button.removeAttribute('data-bs-toggle');
+                    button.removeAttribute('data-bs-target');
+                });
+                
+                // Hide modal, buttons and unnecessary elements
+                clonedBoard.querySelectorAll('.planner-cell-button, .planner-day-summary, #exportPdfBtn').forEach(el => {
+                    el.style.display = 'none';
+                });
+
+                pdfHost.appendChild(header);
+                pdfHost.appendChild(clonedBoard);
+                document.body.appendChild(pdfHost);
+                
+                var opt = {
+                    margin: [6, 6, 6, 6],
+                    filename: fileName,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2, useCORS: true },
+                    jsPDF: { orientation: 'landscape', unit: 'mm', format: 'a3' },
+                    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+                };
+                
+                html2pdf().set(opt).from(pdfHost).save().finally(function() {
+                    if (pdfHost && pdfHost.parentNode) {
+                        pdfHost.parentNode.removeChild(pdfHost);
+                    }
+                });
             });
         }
     </script>
