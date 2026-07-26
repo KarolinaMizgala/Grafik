@@ -635,7 +635,7 @@
                 }
                 else
                     {
-                        <div class="planner-row @(isMonthView ? "planner-row-month" : string.Empty)" style="@rowStyle">
+                        <div class="planner-row @(isMonthView ? "planner-row-month" : string.Empty) @(employee.IsContractZlecenie ? "planner-row-zlecenie" : string.Empty)" style="@rowStyle">
                             <div class="planner-employee-card">
                                 <div class="planner-employee-name">@employee.FullName</div>
                                 <div class="planner-employee-summary">
@@ -1132,19 +1132,30 @@
                 var clonedBoard = element.cloneNode(true);
                 clonedBoard.classList.add('planner-pdf-export');
                 clonedBoard.style.width = (employeeColumnWidth + (daysCount * dayColumnWidth) + ((daysCount + 1) * gapSize)) + 'px';
+                // html2canvas (used by html2pdf.js) does not support CSS Grid, so the clone
+                // is switched to flexbox here or every row collapses to zero height in the PDF.
                 clonedBoard.querySelectorAll('.planner-row').forEach(function(row) {
-                    row.style.gridTemplateColumns = employeeColumnWidth + 'px repeat(' + daysCount + ', ' + dayColumnWidth + 'px)';
+                    row.style.display = 'flex';
+                    row.style.flexWrap = 'nowrap';
+                    row.style.gridTemplateColumns = '';
                     row.style.gap = gapSize + 'px';
                     row.style.marginBottom = '2px';
+                    if (row.firstElementChild) {
+                        row.firstElementChild.style.width = employeeColumnWidth + 'px';
+                        row.firstElementChild.style.minWidth = employeeColumnWidth + 'px';
+                        row.firstElementChild.style.flex = '0 0 auto';
+                    }
                 });
                 clonedBoard.querySelectorAll('.planner-head-cell, .planner-cell').forEach(function(cell) {
                     cell.style.width = dayColumnWidth + 'px';
                     cell.style.minWidth = dayColumnWidth + 'px';
+                    cell.style.flex = '0 0 auto';
                     cell.style.borderRadius = '0';
                 });
                 clonedBoard.querySelectorAll('.planner-employee-card').forEach(function(card) {
                     card.style.width = employeeColumnWidth + 'px';
                     card.style.minWidth = employeeColumnWidth + 'px';
+                    card.style.flex = '0 0 auto';
                     card.style.borderRadius = '0';
                 });
                 clonedBoard.querySelectorAll('.planner-cell-button').forEach(function(button) {

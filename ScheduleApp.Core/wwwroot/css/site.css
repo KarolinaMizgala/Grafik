@@ -856,6 +856,12 @@ body {
     color: #20242c;
 }
 
+.planner-pdf-export .planner-row-zlecenie .planner-cell-normal,
+.planner-pdf-export .planner-row-zlecenie .planner-cell-empty,
+.planner-pdf-export .planner-row-zlecenie .planner-employee-card {
+    background: #fff3b0;
+}
+
 /* Print styles */
 @media print {
     body {
