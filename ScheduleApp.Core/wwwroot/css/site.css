@@ -831,6 +831,31 @@ body {
     cursor: default !important;
 }
 
+.planner-pdf-export .planner-cell-holiday {
+    background: #e21d2f;
+    color: #fff;
+}
+
+.planner-pdf-export .planner-cell-off {
+    background: #b9bec9;
+    color: #20242c;
+}
+
+.planner-pdf-export .planner-cell-sick {
+    background: #4f8ef7;
+    color: #fff;
+}
+
+.planner-pdf-export .planner-cell-night {
+    background: #ffffff;
+    color: #20242c;
+}
+
+.planner-pdf-export .planner-cell-normal {
+    background: #ffffff;
+    color: #20242c;
+}
+
 /* Print styles */
 @media print {
     body {

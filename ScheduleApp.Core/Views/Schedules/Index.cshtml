@@ -654,11 +654,12 @@
                                 }
                                 var isViolationDay = warningMessages.TryGetValue(day.Date, out var dayWarnings);
 
-                                <button type="button" class="@cellClass planner-cell-button" 
-                                        data-bs-toggle="modal" 
+                                <button type="button" class="@cellClass planner-cell-button"
+                                        data-bs-toggle="modal"
                                         data-bs-target="#scheduleFormModal"
                                         data-employee-id="@employee.Id"
                                         data-employee-name="@employee.FullName"
+                                        data-employee-zlecenie="@(employee.IsContractZlecenie ? "1" : "0")"
                                         data-date="@day.ToString("yyyy-MM-dd")"
                                         data-entry-id="@(entry?.Id ?? 0)"
                                         data-start-hour="@FormatInvariantValue(entry?.StartHour)"
@@ -1151,6 +1152,44 @@
                     button.style.cursor = 'default';
                     button.removeAttribute('data-bs-toggle');
                     button.removeAttribute('data-bs-target');
+
+                    var type = button.getAttribute('data-type') || 'Normal';
+                    var isZlecenie = button.getAttribute('data-employee-zlecenie') === '1';
+                    var startHour = button.getAttribute('data-start-hour');
+                    var hasEntry = button.getAttribute('data-entry-id') && button.getAttribute('data-entry-id') !== '0';
+                    var isAutoHoliday = button.classList.contains('planner-cell-holiday') && !hasEntry;
+                    var main = '';
+                    var sub = '';
+
+                    if (hasEntry && (type === 'Normal' || type === 'Noc') && startHour) {
+                        main = decimalToTimeFormat(startHour) || '';
+                        if (isZlecenie) {
+                            sub = 'ZL';
+                        }
+                    } else if (hasEntry && (type === 'Wolne' || type === 'Urlop' || type === 'Święto')) {
+                        main = 'W';
+                    } else if (hasEntry && type === 'Zwolnienie chorobowe') {
+                        main = 'L4';
+                    } else if (isAutoHoliday) {
+                        // Automatycznie wykryta niedziela/święto bez wpisu
+                        main = 'W';
+                    }
+
+                    var warningWrap = button.querySelector('.planner-cell-warning-wrap');
+                    button.innerHTML = '';
+                    var mainDiv = document.createElement('div');
+                    mainDiv.className = 'planner-cell-main';
+                    mainDiv.textContent = main;
+                    button.appendChild(mainDiv);
+                    if (sub) {
+                        var subDiv = document.createElement('div');
+                        subDiv.className = 'planner-cell-sub';
+                        subDiv.textContent = sub;
+                        button.appendChild(subDiv);
+                    }
+                    if (warningWrap) {
+                        button.appendChild(warningWrap);
+                    }
                 });
 
                 clonedBoard.querySelectorAll('.planner-employee-summary, .planner-day-summary, #exportPdfBtn, .planner-controls, .planner-menu-btn, .dropdown, .modal, .app-topbar, .app-sidebar').forEach(function(el) {
