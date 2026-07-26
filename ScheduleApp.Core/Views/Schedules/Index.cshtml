@@ -1127,24 +1127,6 @@
                 var pdfHost = document.createElement('div');
                 pdfHost.className = 'planner-pdf-host';
 
-                var header = document.createElement('div');
-                header.className = 'planner-pdf-header';
-                header.innerHTML = `
-                    <div>
-                        <div class="planner-pdf-title">Harmonogram miesięczny</div>
-                        <div class="planner-pdf-subtitle">@rangeLabel</div>
-                    </div>
-                    <div class="planner-pdf-meta">Wygenerowano: ${new Date().toLocaleDateString('pl-PL')}</div>
-                `;
-
-                var summary = document.createElement('div');
-                summary.className = 'planner-pdf-summary';
-                summary.innerHTML = @Html.Raw(JsonSerializer.Serialize(pdfSummaryHtml));
-
-                var dailySummary = document.createElement('div');
-                dailySummary.className = 'planner-pdf-daily-summary';
-                dailySummary.innerHTML = @Html.Raw(JsonSerializer.Serialize(pdfDailySummaryHtml));
-
                 // Create a copy of the board for PDF
                 var clonedBoard = element.cloneNode(true);
                 clonedBoard.classList.add('planner-pdf-export');
@@ -1170,15 +1152,11 @@
                     button.removeAttribute('data-bs-toggle');
                     button.removeAttribute('data-bs-target');
                 });
-                
-                // Hide modal, buttons and unnecessary UI controls (keep cell content visible)
-                clonedBoard.querySelectorAll('.planner-day-summary, #exportPdfBtn, .planner-controls, .planner-menu-btn, .dropdown, .modal, .app-topbar, .app-sidebar').forEach(el => {
+
+                clonedBoard.querySelectorAll('.planner-employee-summary, .planner-day-summary, #exportPdfBtn, .planner-controls, .planner-menu-btn, .dropdown, .modal, .app-topbar, .app-sidebar').forEach(function(el) {
                     el.style.display = 'none';
                 });
-
-                pdfHost.appendChild(header);
-                pdfHost.appendChild(summary);
-                pdfHost.appendChild(dailySummary);
+                
                 pdfHost.appendChild(clonedBoard);
                 document.body.appendChild(pdfHost);
                 
