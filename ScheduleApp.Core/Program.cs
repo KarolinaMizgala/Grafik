@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
 using System.Data.Common;
 using ScheduleAppCore.Data;
 using ScheduleAppCore.Infrastructure;
@@ -15,7 +16,18 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ScheduleContext>();
     Directory.CreateDirectory(Path.Combine(app.Environment.ContentRootPath, "App_Data"));
-    db.Database.EnsureCreated();
+    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? string.Empty;
+    var sqliteBuilder = new SqliteConnectionStringBuilder(connectionString);
+    var databasePath = sqliteBuilder.DataSource;
+    if (!Path.IsPathRooted(databasePath))
+    {
+        databasePath = Path.Combine(app.Environment.ContentRootPath, databasePath);
+    }
+
+    if (!File.Exists(databasePath))
+    {
+        db.Database.EnsureCreated();
+    }
     EnsureEmployeeColumns(db);
     // SampleDataSeeder.Seed(db);  // Wyłączone - baza danych będzie pusta
 }

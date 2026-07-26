@@ -468,6 +468,18 @@ body {
     min-height: 88px;
 }
 
+.planner-row-month .planner-cell-main {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.12;
+}
+
+.planner-row-month .planner-cell-sub {
+    font-size: 10px;
+    line-height: 1.1;
+    margin-top: 1px;
+}
+
 .planner-head-cell,
 .planner-employee-card,
 .planner-cell {
