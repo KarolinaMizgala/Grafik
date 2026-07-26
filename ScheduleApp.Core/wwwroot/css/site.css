@@ -680,9 +680,24 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     padding-bottom: 8px;
     border-bottom: 2px solid #d9def0;
+}
+
+.planner-pdf-summary {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.planner-pdf-summary-item {
+    font-size: 11px;
+    line-height: 1.3;
+    padding: 6px 8px;
+    background: #f6f7fb;
+    border: 1px solid #e4e8f1;
+    border-radius: 6px;
 }
 
 .planner-pdf-title {

@@ -55,6 +55,17 @@
         selectedDay = days.First();
     }
     var months = new[] { "Sty", "Lut", "Mar", "Kwi", "Maj", "Cze", "Lip", "Sie", "Wrz", "Paź", "Lis", "Gru" };
+    var pdfSummaryHtml = string.Join("", Model.Employees.Select(employee =>
+    {
+        var employeeEntries = Model.Entries.Where(item => item.EmployeeId == employee.Id).ToList();
+        var contractPeriod = GetContractPeriod(monthStart, employee.ContractMonths);
+        var plannedWorkingEntries = employeeEntries.Where(item => IsCountedAsPlanned(item.Type) && item.Date.Date >= contractPeriod.Start.Date && item.Date.Date <= contractPeriod.End.Date).ToList();
+        var plannedHours = plannedWorkingEntries.Sum(item => GetEntryHours(item, employee));
+        var plannedDays = plannedWorkingEntries.Count;
+        var overHours = plannedHours > employee.NormHours;
+        var cssClass = overHours ? "danger" : string.Empty;
+        return $"<div class=\"planner-pdf-summary-item {cssClass}\"><strong>{employee.FullName}</strong> · Norma: {FormatValue(employee.NormHours)} godz. / {employee.ContractMonths} mies. · Zaplanowano: {FormatValue(plannedHours)} godz. / {plannedDays} dni</div>";
+    }));
 }
 
 @{
@@ -1105,6 +1116,10 @@
                     <div class="planner-pdf-meta">Wygenerowano: ${new Date().toLocaleDateString('pl-PL')}</div>
                 `;
 
+                var summary = document.createElement('div');
+                summary.className = 'planner-pdf-summary';
+                summary.innerHTML = @Html.Raw(JsonSerializer.Serialize(pdfSummaryHtml));
+
                 // Create a copy of the board for PDF
                 var clonedBoard = element.cloneNode(true);
                 clonedBoard.classList.add('planner-pdf-export');
@@ -1137,6 +1152,7 @@
                 });
 
                 pdfHost.appendChild(header);
+                pdfHost.appendChild(summary);
                 pdfHost.appendChild(clonedBoard);
                 document.body.appendChild(pdfHost);
                 

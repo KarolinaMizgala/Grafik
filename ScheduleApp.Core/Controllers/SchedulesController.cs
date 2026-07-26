@@ -26,8 +26,8 @@ public class SchedulesController : Controller
         var visibleDays = GetVisibleDays(weekStart, viewMode);
 
         var employees = await _context.Employees
-            .OrderBy(employee => employee.LastName)
-            .ThenBy(employee => employee.FirstName)
+            .OrderBy(employee => employee.CreatedDate)
+            .ThenBy(employee => employee.Id)
             .ToListAsync();
 
         var entries = await _context.ScheduleEntries
@@ -247,8 +247,8 @@ public class SchedulesController : Controller
     private async Task<IEnumerable<SelectListItem>> GetEmployeeItemsAsync()
     {
         var employees = await _context.Employees
-            .OrderBy(employee => employee.LastName)
-            .ThenBy(employee => employee.FirstName)
+            .OrderBy(employee => employee.CreatedDate)
+            .ThenBy(employee => employee.Id)
             .ToListAsync();
 
         return new[]
